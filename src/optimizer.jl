@@ -22,10 +22,10 @@ const _DEFAULT_OPTIONS = Dict{String, Any}(
     Optimizer(; nlp_solver, mip_solver = nlp_solver, kwargs...)
 
 Logic-based outer approximation solver for models containing
-[`DisjunctionSet`](@ref) constraints. `nlp_solver` and `mip_solver`
-are optimizer factories as accepted by `MOI.instantiate`. The
-remaining keyword arguments set raw options (also reachable through
-`MOI.RawOptimizerAttribute`):
+`DisjunctiveProgramming.DisjunctionSet` constraints. `nlp_solver`
+and `mip_solver` are optimizer factories as accepted by
+`MOI.instantiate`. The remaining keyword arguments set raw options
+(also reachable through `MOI.RawOptimizerAttribute`):
 
 - `max_iter = 10`: master/NLP iterations after the set-covering seed.
 - `set_cover_max_iter = 8`: set-covering initialization iterations.
