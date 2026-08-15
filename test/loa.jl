@@ -28,6 +28,25 @@ function test_linear_disjunction()
     @test dual_status(model) == MOI.NO_SOLUTION
 end
 
+# Same instance with function constants left in the rows, as
+# InfiniteOpt transcription produces: x - 7 >= -5 and x - 5 >= 0.
+# The parse must shift the constants into the sets or direct solver
+# wrappers reject the subproblem rows.
+function test_row_function_constants()
+    model = Model(_loa_optimizer())
+    set_silent(model)
+    @variable(model, 0 <= x <= 10)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x - 7, x - 5] in
+        DA.DisjunctionSet([
+            [MOI.GreaterThan(-5.0)], [MOI.GreaterThan(0.0)]]))
+    @objective(model, Min, x)
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test objective_value(model) ≈ 2.0 atol = 1e-5
+    @test value(z[1]) ≈ 1.0 atol = 1e-5
+end
+
 # Convex quadratic objective over linear disjuncts: y >= x or
 # y >= 2 - x. The optimum sits at x = 3, y = 0 in disjunct 2.
 function test_quadratic_objective()
@@ -750,6 +769,7 @@ end
 
 @testset "LOA loop" begin
     test_linear_disjunction()
+    test_row_function_constants()
     test_nested_disjunction()
     test_nested_disjunction_vacuous()
     test_quadratic_objective()

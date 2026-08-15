@@ -96,10 +96,14 @@ function _parse_disjunction(
             binary.value)
         MOI.is_valid(cache, zero_one) || error("The indicator variable " *
             "of a `DisjunctionSet` disjunct must be `MOI.ZeroOne`.")
-        functions = MOI.AbstractScalarFunction[
-            _as_row(_demote(rows[k])) for k in row_indices(set, i)]
+        # transcribed rows can carry function constants: shift them
+        # into the scalar sets so consumers add constant-free rows
+        normalized = [MOI.Utilities.normalize_constant(
+            _as_row(_demote(rows[k])), inner) for (k, inner) in
+            zip(row_indices(set, i), set.inner_sets[i])]
         push!(disjuncts, _Disjunct(activation, binary, active_value,
-            functions, set.inner_sets[i]))
+            MOI.AbstractScalarFunction[f for (f, _) in normalized],
+            MOI.AbstractScalarSet[s for (_, s) in normalized]))
     end
     return _Disjunction(disjunction_activation, disjuncts)
 end
