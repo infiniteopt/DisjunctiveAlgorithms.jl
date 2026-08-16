@@ -58,7 +58,7 @@ function _build_master(model::Optimizer, problem::_Problem)
     for disjunction in problem.disjunctions
         _add_exactly_one(mip, variable_map, disjunction)
         for disjunct in disjunction.disjuncts
-            _add_gated_rows(mip, variable_map, disjunct, model.options)
+            _add_gated_rows(mip, variable_map, disjunct, model)
         end
     end
     alpha_oa = MOI.add_variable(mip)
@@ -95,21 +95,22 @@ _indicator_sets(set::MOI.Interval{Float64}) =
 _indicator_sets(set::MOI.AbstractScalarSet) = (set,)
 
 # Gate each linear row with an indicator constraint or big-M per
-# `master_gating`; nonlinear rows enter the master only as OA cuts
+# `MasterReformulation`; nonlinear rows enter the master only as OA
+# cuts
 function _add_gated_rows(
     mip::MOI.ModelLike,
     variable_map::AbstractDict,
     disjunct::_Disjunct,
-    options::Dict{String, Any}
+    model::Optimizer
     )
-    gating = options["master_gating"]
+    gating = MOI.get(model, MasterReformulation())
     gating in ("indicator", "bigm") ||
-        error("Unknown `master_gating` value `$gating`.")
+        error("Unknown `MasterReformulation` value `$gating`.")
     activate = disjunct.active_value ? MOI.ACTIVATE_ON_ONE :
         MOI.ACTIVATE_ON_ZERO
     binary = variable_map[disjunct.binary]
     activation = _map_to(variable_map, disjunct.activation)
-    M = Float64(options["M_value"])
+    M = Float64(MOI.get(model, M_Value()))
     # M * (1 - activation) moved left, as in the disjunct OA cuts
     gate = MOI.Utilities.operate(-, Float64,
         MOI.Utilities.operate(*, Float64, M, activation), M)
@@ -136,14 +137,14 @@ end
 # bounded penalized slack so an invalid cut cannot blow up the master
 function _add_penalized_slack(
     master::_Master,
-    options::Dict{String, Any},
+    model::Optimizer,
     penalty_sign::Int
     )
     slack = MOI.add_variable(master.model)
     MOI.add_constraint(master.model, slack, MOI.GreaterThan(0.0))
     MOI.add_constraint(master.model, slack,
-        MOI.LessThan(Float64(options["max_slack"])))
-    penalty = penalty_sign * Float64(options["oa_penalty"])
+        MOI.LessThan(Float64(MOI.get(model, MaxSlack()))))
+    penalty = penalty_sign * Float64(MOI.get(model, OASlack()))
     master.oa_objective = MOI.Utilities.operate(+, Float64,
         master.oa_objective, MOI.ScalarAffineFunction(
             [MOI.ScalarAffineTerm(penalty, slack)], 0.0))

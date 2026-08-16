@@ -18,7 +18,7 @@ function _build_toy_disjunction(model)
 end
 
 function test_optimizer_scaffold()
-    optimizer = DA.Optimizer()
+    optimizer = DA.Optimizer(nothing)
     @test MOI.is_empty(optimizer)
     @test MOI.get(optimizer, MOI.SolverName()) == "DisjunctiveAlgorithms"
     @test MOI.get(optimizer, MOI.TerminationStatus()) ==
@@ -29,27 +29,32 @@ function test_optimizer_scaffold()
 end
 
 function test_optimizer_options()
-    optimizer = DA.Optimizer(max_iter = 25)
-    @test MOI.get(optimizer, MOI.RawOptimizerAttribute("max_iter")) == 25
-    MOI.set(optimizer, MOI.RawOptimizerAttribute("max_iter"), 5)
-    @test MOI.get(optimizer, MOI.RawOptimizerAttribute("max_iter")) == 5
-    @test MOI.get(optimizer, MOI.RawOptimizerAttribute("M_value")) == 1e9
-    bogus = MOI.RawOptimizerAttribute("bogus")
-    @test !MOI.supports(optimizer, bogus)
-    @test_throws MOI.UnsupportedAttribute MOI.get(optimizer, bogus)
-    @test_throws MOI.UnsupportedAttribute MOI.set(optimizer, bogus, 1)
-    @test_throws ArgumentError DA.Optimizer(bogus = 1)
+    optimizer = DA.Optimizer(nothing)
+    @test MOI.get(optimizer, DA.Algorithm()) === nothing
+    @test MOI.supports(optimizer, DA.Algorithm())
+    @test MOI.supports(optimizer, DA.NumIterationLimit())
+    @test MOI.get(optimizer, DA.NumIterationLimit()) == 10
+    # setting an attribute materializes the default algorithm
+    MOI.set(optimizer, DA.NumIterationLimit(), 5)
+    @test MOI.get(optimizer, DA.NumIterationLimit()) == 5
+    @test MOI.get(optimizer, DA.Algorithm()) isa DA.LOA
+    @test MOI.get(optimizer, DA.M_Value()) == 1e9
+    algorithm = DA.LOA()
+    MOI.set(optimizer, DA.Algorithm(), algorithm)
+    @test MOI.get(optimizer, DA.Algorithm()) === algorithm
+    @test MOI.get(optimizer, DA.NumIterationLimit()) == 10
+    @test !MOI.supports(optimizer, MOI.RawOptimizerAttribute("max_iter"))
     MOI.set(optimizer, MOI.Silent(), true)
     @test MOI.get(optimizer, MOI.Silent())
+    @test MOI.get(optimizer, MOI.TimeLimitSec()) == 3600.0
     MOI.set(optimizer, MOI.TimeLimitSec(), 100)
     @test MOI.get(optimizer, MOI.TimeLimitSec()) == 100.0
-    @test MOI.get(optimizer, MOI.RawOptimizerAttribute("time_limit")) == 100.0
     MOI.set(optimizer, MOI.TimeLimitSec(), nothing)
     @test MOI.get(optimizer, MOI.TimeLimitSec()) === nothing
 end
 
 function test_model_building()
-    optimizer = DA.Optimizer()
+    optimizer = DA.Optimizer(nothing)
     x, z, set, ci = _build_toy_disjunction(optimizer)
     @test MOI.is_valid(optimizer, ci)
     @test MOI.get(optimizer, MOI.NumberOfVariables()) == 3
@@ -74,7 +79,7 @@ function test_copy_to()
     MOI.set(src, MOI.ObjectiveSense(), MOI.MIN_SENSE)
     MOI.set(src, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Float64}}(),
         MOI.ScalarAffineFunction([MOI.ScalarAffineTerm(1.0, x)], 0.0))
-    dest = DA.Optimizer()
+    dest = DA.Optimizer(nothing)
     index_map = MOI.copy_to(dest, src)
     @test MOI.get(dest, MOI.NumberOfVariables()) == 3
     @test (MOI.VectorAffineFunction{Float64}, DA.DisjunctionSet) in
@@ -87,7 +92,7 @@ end
 # The incremental MOI surface forwards to the cache: names, starts,
 # constrained variables, and deletion.
 function test_moi_forwarding()
-    optimizer = DA.Optimizer()
+    optimizer = DA.Optimizer(nothing)
     @test MOI.supports_incremental_interface(optimizer)
     x = MOI.add_variable(optimizer)
     MOI.set(optimizer, MOI.VariableName(), x, "x")
@@ -109,7 +114,7 @@ end
 
 # A constraint type the partition cannot place errors at solve time.
 function test_unsupported_constraint_type()
-    optimizer = DA.Optimizer()
+    optimizer = DA.Optimizer(nothing)
     x = MOI.add_variable(optimizer)
     func = MOI.VectorAffineFunction(
         [MOI.VectorAffineTerm(1, MOI.ScalarAffineTerm(1.0, x))], [0.0])

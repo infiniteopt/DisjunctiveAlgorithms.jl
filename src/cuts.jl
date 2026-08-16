@@ -145,7 +145,7 @@ function _add_objective_cut(
     sign::Int
     )
     lin = _master_linearization(master, linearizer, master.objective, point)
-    slack = _add_penalized_slack(master, model.options, sign)
+    slack = _add_penalized_slack(master, model, sign)
     alpha = _to_affine(master.alpha_oa)
     if master.sense == MOI.MAX_SENSE
         body = MOI.Utilities.operate(-, Float64,
@@ -167,7 +167,7 @@ function _add_global_oa_row(
     set::MOI.AbstractScalarSet,
     sign::Int
     )
-    slack = _add_penalized_slack(master, model.options, sign)
+    slack = _add_penalized_slack(master, model, sign)
     for term in _oa_cut_terms(set, lin)
         body = MOI.Utilities.operate(-, Float64, term, _to_affine(slack))
         MOI.Utilities.normalize_and_add_constraint(master.model, body,
@@ -186,12 +186,12 @@ function _add_disjunct_oa_cut(
     set::MOI.AbstractScalarSet,
     sign::Int
     )
-    M = Float64(_option(model, "M_value"))
+    M = Float64(MOI.get(model, M_Value()))
     activation = _map_to(master.variable_map, disjunct.activation)
     # M * (1 - activation) moved left: term - slack + M * activation - M
     gate = MOI.Utilities.operate(-, Float64,
         MOI.Utilities.operate(*, Float64, M, activation), M)
-    slack = _add_penalized_slack(master, model.options, sign)
+    slack = _add_penalized_slack(master, model, sign)
     for term in _oa_cut_terms(set, lin)
         body = MOI.Utilities.operate(+, Float64,
             MOI.Utilities.operate(-, Float64, term, _to_affine(slack)), gate)

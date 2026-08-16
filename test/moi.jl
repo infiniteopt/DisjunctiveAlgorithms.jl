@@ -7,10 +7,9 @@ import Ipopt
 
 @testset "MOI contract (model API + attributes)" begin
     optimizer = MOI.instantiate(
-        () -> DA.Optimizer(
-            nlp_solver = Ipopt.Optimizer,
-            mip_solver = HiGHS.Optimizer,
-            time_limit = 20.0,
+        MOI.OptimizerWithAttributes(
+            () -> DA.Optimizer(Ipopt.Optimizer, HiGHS.Optimizer),
+            MOI.TimeLimitSec() => 20.0,
         );
         with_cache_type = Float64,
         with_bridge_type = Float64,

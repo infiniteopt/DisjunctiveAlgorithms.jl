@@ -1,9 +1,9 @@
 using JuMP
 import HiGHS, Ipopt
 
-function _loa_optimizer(; kwargs...)
-    return () -> DA.Optimizer(; nlp_solver = Ipopt.Optimizer,
-        mip_solver = HiGHS.Optimizer, kwargs...)
+function _loa_optimizer(attrs::Pair...)
+    return optimizer_with_attributes(
+        () -> DA.Optimizer(Ipopt.Optimizer, HiGHS.Optimizer), attrs...)
 end
 
 # min x with x >= 2 (disjunct 1) or x >= 5 (disjunct 2). The loop
@@ -37,9 +37,8 @@ function test_row_function_constants()
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
-    @constraint(model, [1, z[1], z[2], x - 7, x - 5] in
-        DA.DisjunctionSet([
-            [MOI.GreaterThan(-5.0)], [MOI.GreaterThan(0.0)]]))
+    @constraint(model, [1, z[1], z[2], x - 7, x - 5] in DA.DisjunctionSet([
+        [MOI.GreaterThan(-5.0)], [MOI.GreaterThan(0.0)]]))
     @objective(model, Min, x)
     optimize!(model)
     @test termination_status(model) == MOI.LOCALLY_SOLVED
@@ -195,10 +194,10 @@ function test_complement_indicator()
     @test value(z) ≈ 0.0 atol = 1e-5
 end
 
-# `use_nlpf = false` still solves by enumeration when the seeds are
-# feasible.
+# `UseNLPF() => false` still solves by enumeration when the seeds
+# are feasible.
 function test_nlpf_disabled()
-    model = Model(_loa_optimizer(use_nlpf = false))
+    model = Model(_loa_optimizer(DA.UseNLPF() => false))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -212,8 +211,9 @@ end
 
 # Big-M master gating solves the same instances as indicator gating
 # (interval split included).
-function test_bigm_master_gating()
-    model = Model(_loa_optimizer(master_gating = "bigm", M_value = 100.0))
+function test_bigm_master_reformulation()
+    model = Model(_loa_optimizer(DA.MasterReformulation() => "bigm",
+        DA.M_Value() => 100.0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -226,11 +226,11 @@ function test_bigm_master_gating()
     @test objective_value(model) ≈ 7.0 atol = 1e-4
 end
 
-# Integer-typed options convert at their use sites, including the
-# Bool read of use_nlpf on the infeasible-seed path.
+# Integer-typed attribute values convert on set, including the Bool
+# `UseNLPF` on the infeasible-seed path.
 function test_integer_options()
-    model = Model(_loa_optimizer(use_nlpf = 0, M_value = 10^9,
-        time_limit = 3600))
+    model = Model(_loa_optimizer(DA.UseNLPF() => 0, DA.M_Value() => 10^9,
+        MOI.TimeLimitSec() => 3600))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -246,8 +246,7 @@ end
 # in the subproblem, which the nlp_solver must then handle (HiGHS
 # both roles here since the model is linear).
 function test_non_indicator_binary()
-    factory = () -> DA.Optimizer(nlp_solver = HiGHS.Optimizer,
-        mip_solver = HiGHS.Optimizer)
+    factory = () -> DA.Optimizer(HiGHS.Optimizer)
     model = Model(factory)
     set_silent(model)
     @variable(model, 0 <= x <= 10)
@@ -281,7 +280,7 @@ end
 
 # A zero time limit exits before any solve.
 function test_time_limit()
-    model = Model(_loa_optimizer(time_limit = 0.0))
+    model = Model(_loa_optimizer(MOI.TimeLimitSec() => 0.0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -400,10 +399,11 @@ function test_nonlinear_exp_global()
     @test value(z[2]) ≈ 1.0 atol = 1e-5
 end
 
-# `use_nlpf = false` with an infeasible combination: the solve keeps
-# only the no-good cut and still finishes from the other disjunct.
+# `UseNLPF() => false` with an infeasible combination: the solve
+# keeps only the no-good cut and still finishes from the other
+# disjunct.
 function test_nlpf_disabled_infeasible_combination()
-    model = Model(_loa_optimizer(use_nlpf = false))
+    model = Model(_loa_optimizer(DA.UseNLPF() => false))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -473,7 +473,8 @@ end
 
 # Zero iteration budgets exit before any solve, without an incumbent.
 function test_iteration_limit_no_incumbent()
-    model = Model(_loa_optimizer(set_cover_max_iter = 0, max_iter = 0))
+    model = Model(_loa_optimizer(DA.SetCoverIterationLimit() => 0,
+        DA.NumIterationLimit() => 0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -485,10 +486,10 @@ function test_iteration_limit_no_incumbent()
     @test result_count(model) == 0
 end
 
-# `max_iter = 0` keeps the set-covering incumbent but produces no
-# master bound.
+# `NumIterationLimit() => 0` keeps the set-covering incumbent but
+# produces no master bound.
 function test_iteration_limit_with_incumbent()
-    model = Model(_loa_optimizer(max_iter = 0))
+    model = Model(_loa_optimizer(DA.NumIterationLimit() => 0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -506,7 +507,7 @@ end
 # An unbounded master (no OA cuts yet bound alpha_oa) surfaces its
 # status instead of looping.
 function test_master_abnormal_status()
-    model = Model(_loa_optimizer(set_cover_max_iter = 0))
+    model = Model(_loa_optimizer(DA.SetCoverIterationLimit() => 0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
     @variable(model, z[1:2], Bin)
@@ -519,115 +520,11 @@ function test_master_abnormal_status()
     @test occursin("master solve finished", raw_status(model))
 end
 
-################################################################################
-#                            MOCK SOLVER
-################################################################################
-# Delegates every MOI call to a wrapped optimizer, but sleeps
-# `sleep_time` seconds in each solve and, from solve `fail_from` on,
-# skips the inner solve and reports `fail_status` with no solution.
-# Deterministic triggers for the deadline and abnormal-master paths.
-mutable struct MockSolver <: MOI.AbstractOptimizer
-    inner::MOI.AbstractOptimizer
-    sleep_time::Float64
-    fail_from::Int
-    fail_status::MOI.TerminationStatusCode
-    solves::Int
-    failing::Bool
-end
-
-function MockSolver(
-    factory;
-    sleep_time::Float64 = 0.0,
-    fail_from::Int = typemax(Int),
-    fail_status::MOI.TerminationStatusCode = MOI.NODE_LIMIT
-    )
-    return MockSolver(MOI.instantiate(factory), sleep_time, fail_from,
-        fail_status, 0, false)
-end
-
-function MOI.optimize!(model::MockSolver)
-    model.solves += 1
-    model.sleep_time > 0 && sleep(model.sleep_time)
-    model.failing = model.solves >= model.fail_from
-    model.failing || MOI.optimize!(model.inner)
-    return
-end
-
-const _WrappedAttr = Union{MOI.AbstractModelAttribute,
-    MOI.AbstractOptimizerAttribute}
-const _WrappedIndexAttr = Union{MOI.AbstractVariableAttribute,
-    MOI.AbstractConstraintAttribute}
-const _WrappedIndex = Union{MOI.VariableIndex, MOI.ConstraintIndex}
-
-function MOI.get(model::MockSolver, attr::_WrappedAttr)
-    if model.failing
-        attr isa MOI.TerminationStatus && return model.fail_status
-        attr isa MOI.PrimalStatus && return MOI.NO_SOLUTION
-    end
-    return MOI.get(model.inner, attr)
-end
-
-MOI.is_empty(model::MockSolver) = MOI.is_empty(model.inner)
-MOI.empty!(model::MockSolver) = MOI.empty!(model.inner)
-MOI.supports_incremental_interface(::MockSolver) = true
-MOI.copy_to(model::MockSolver, src::MOI.ModelLike) =
-    MOI.copy_to(model.inner, src)
-MOI.add_variable(model::MockSolver) = MOI.add_variable(model.inner)
-MOI.delete(model::MockSolver, index) = MOI.delete(model.inner, index)
-MOI.is_valid(model::MockSolver, index) = MOI.is_valid(model.inner, index)
-
-function MOI.add_constraint(
-    model::MockSolver,
-    func::MOI.AbstractFunction,
-    set::MOI.AbstractSet
-    )
-    return MOI.add_constraint(model.inner, func, set)
-end
-
-function MOI.supports_constraint(
-    model::MockSolver,
-    F::Type{<:MOI.AbstractFunction},
-    S::Type{<:MOI.AbstractSet}
-    )
-    return MOI.supports_constraint(model.inner, F, S)
-end
-
-MOI.supports(model::MockSolver, attr::_WrappedAttr) =
-    MOI.supports(model.inner, attr)
-
-MOI.set(model::MockSolver, attr::_WrappedAttr, value) =
-    MOI.set(model.inner, attr, value)
-
-function MOI.supports(
-    model::MockSolver,
-    attr::_WrappedIndexAttr,
-    I::Type{<:_WrappedIndex}
-    )
-    return MOI.supports(model.inner, attr, I)
-end
-
-function MOI.get(
-    model::MockSolver,
-    attr::_WrappedIndexAttr,
-    index::_WrappedIndex
-    )
-    return MOI.get(model.inner, attr, index)
-end
-
-function MOI.set(
-    model::MockSolver,
-    attr::_WrappedIndexAttr,
-    index::_WrappedIndex,
-    value
-    )
-    return MOI.set(model.inner, attr, index, value)
-end
-
 function _mock_time_limit_model(limit::Float64; kwargs...)
-    factory = () -> DA.Optimizer(
-        nlp_solver = () -> MockSolver(Ipopt.Optimizer; kwargs...),
-        mip_solver = HiGHS.Optimizer,
-        iteration_time_limit = limit)
+    factory = optimizer_with_attributes(
+        () -> DA.Optimizer(() -> MockSolver(Ipopt.Optimizer; kwargs...),
+            HiGHS.Optimizer),
+        DA.IterationTimeLimit() => limit)
     model = Model(factory)
     set_silent(model)
     @variable(model, 0 <= x <= 10)
@@ -636,6 +533,26 @@ function _mock_time_limit_model(limit::Float64; kwargs...)
         [MOI.GreaterThan(2.0)], [MOI.GreaterThan(5.0)]]))
     @objective(model, Min, x)
     return model
+end
+
+# Strict mocks on both roles run the whole loop (master, NLP, NLPF, cuts)
+# against a direct-mode solver contract: rows arrive with function
+# constants and the loop must never pass one through.
+function test_strict_constant_solvers()
+    factory = () -> DA.Optimizer(
+        () -> MockSolver(Ipopt.Optimizer, strict_constants = true),
+        () -> MockSolver(HiGHS.Optimizer, strict_constants = true))
+    model = Model(factory)
+    set_silent(model)
+    @variable(model, 0 <= x <= 10)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x - 7, x - 5] in DA.DisjunctionSet([
+        [MOI.GreaterThan(-5.0)], [MOI.GreaterThan(0.0)]]))
+    @objective(model, Min, x)
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test objective_value(model) ≈ 2.0 atol = 1e-5
+    @test value(z[1]) ≈ 1.0 atol = 1e-5
 end
 
 # The loop deadline passes right after the covering incumbent: the
@@ -657,9 +574,8 @@ end
 # The master finishes abnormally after an incumbent exists: the mock
 # master reports a node limit on its second solve.
 function test_master_abnormal_status_with_incumbent()
-    factory = () -> DA.Optimizer(
-        nlp_solver = Ipopt.Optimizer,
-        mip_solver = () -> MockSolver(HiGHS.Optimizer, fail_from = 2))
+    factory = () -> DA.Optimizer(Ipopt.Optimizer,
+        () -> MockSolver(HiGHS.Optimizer, fail_from = 2))
     model = Model(factory)
     set_silent(model)
     @variable(model, 0 <= x <= 10)
@@ -786,7 +702,7 @@ end
     test_nlpf_slacked_rows()
     test_demoted_affine_global()
     test_vector_of_variables_disjunction()
-    test_bigm_master_gating()
+    test_bigm_master_reformulation()
     test_integer_options()
     test_non_indicator_binary()
     test_infeasible_no_incumbent()
@@ -794,6 +710,7 @@ end
     test_iteration_limit_no_incumbent()
     test_iteration_limit_with_incumbent()
     test_master_abnormal_status()
+    test_strict_constant_solvers()
     test_time_limit_with_incumbent()
     test_master_abnormal_status_with_incumbent()
     test_nonconvex_never_optimal()

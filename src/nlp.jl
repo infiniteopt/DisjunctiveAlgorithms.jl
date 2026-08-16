@@ -92,7 +92,7 @@ function _solve_nlp(
             objective = MOI.get(sub.model, MOI.ObjectiveValue()),
             feasible = true)
     end
-    if Bool(_option(model, "use_nlpf"))
+    if Bool(MOI.get(model, UseNLPF()))
         result = _solve_nlpf(model, problem, combination, warm_start;
             deadline = deadline)
         result === nothing || return result

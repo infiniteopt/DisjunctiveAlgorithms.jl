@@ -1,6 +1,73 @@
 ################################################################################
 #                    LOGIC-BASED OUTER APPROXIMATION
 ################################################################################
+"""
+    LOA()
+
+`LOA` implements logic-based outer approximation (Turkay and
+Grossmann 1996): a MILP master keeps the linear rows exactly, gates
+each disjunct's rows on its indicator, and accumulates OA cuts from
+NLP subproblems solved at fixed indicator combinations, seeded by a
+set-covering pass over the nonlinear disjuncts. The OA bound is only
+valid on convex problems, so convergence reports `LOCALLY_SOLVED`,
+never `OPTIMAL`.
+
+## Supported optimizer attributes
+
+- [`NumIterationLimit`](@ref)
+- [`SetCoverIterationLimit`](@ref)
+- [`M_Value`](@ref)
+- [`MasterReformulation`](@ref)
+- [`MaxSlack`](@ref)
+- [`OASlack`](@ref)
+- [`UseNLPF`](@ref)
+- [`ConvergenceTolerance`](@ref)
+- [`SlackTolerance`](@ref)
+- [`IterationTimeLimit`](@ref)
+"""
+mutable struct LOA <: AbstractAlgorithm
+    num_iteration_limit::Union{Nothing, Int}
+    set_cover_iteration_limit::Union{Nothing, Int}
+    m_value::Union{Nothing, Float64}
+    master_reformulation::Union{Nothing, String}
+    max_slack::Union{Nothing, Float64}
+    oa_slack::Union{Nothing, Float64}
+    use_nlpf::Union{Nothing, Bool}
+    convergence_tolerance::Union{Nothing, Float64}
+    slack_tolerance::Union{Nothing, Float64}
+    iteration_time_limit::Union{Nothing, Float64}
+
+    LOA() = new(nothing, nothing, nothing, nothing, nothing, nothing,
+        nothing, nothing, nothing, nothing)
+end
+
+_default(::Algorithm) = LOA()
+
+# An unset field (`nothing`) reads back as the attribute default.
+for (attr, field) in (
+    (NumIterationLimit, :num_iteration_limit),
+    (SetCoverIterationLimit, :set_cover_iteration_limit),
+    (M_Value, :m_value),
+    (MasterReformulation, :master_reformulation),
+    (MaxSlack, :max_slack),
+    (OASlack, :oa_slack),
+    (UseNLPF, :use_nlpf),
+    (ConvergenceTolerance, :convergence_tolerance),
+    (SlackTolerance, :slack_tolerance),
+    (IterationTimeLimit, :iteration_time_limit),
+    )
+    @eval begin
+        MOI.supports(::LOA, ::$attr) = true
+        function MOI.set(algorithm::LOA, ::$attr, value)
+            algorithm.$field = value
+            return
+        end
+        function MOI.get(algorithm::LOA, attr::$attr)
+            return something(algorithm.$field, _default(algorithm, attr))
+        end
+    end
+end
+
 _worst_objective(sense::MOI.OptimizationSense) =
     sense == MOI.MAX_SENSE ? -Inf : Inf
 _is_better(sense::MOI.OptimizationSense, new, best) =
@@ -77,7 +144,7 @@ end
 ################################################################################
 #                              MAIN LOOP
 ################################################################################
-function MOI.optimize!(model::Optimizer)
+function _optimize!(algorithm::LOA, model::Optimizer)
     t_start = time()
     _reset_results(model)
     problem = _build_problem(model)
@@ -85,9 +152,9 @@ function MOI.optimize!(model::Optimizer)
     subproblem = _build_subproblem(model, problem)
     linearizer = _Linearizer()
     sense = problem.sense
-    overall_deadline = t_start + Float64(_option(model, "time_limit"))
+    overall_deadline = t_start + something(model.time_limit_sec, Inf)
     loop_deadline = min(overall_deadline,
-        t_start + Float64(_option(model, "iteration_time_limit")))
+        t_start + Float64(MOI.get(algorithm, IterationTimeLimit())))
 
     best_objective = _worst_objective(sense)
     best_result = nothing
@@ -117,7 +184,7 @@ function MOI.optimize!(model::Optimizer)
     cover = _cover_disjuncts(problem)
     needs_cover = trues(length(cover))
     num_covered = 0
-    for iteration in 1:_option(model, "set_cover_max_iter")
+    for iteration in 1:MOI.get(algorithm, SetCoverIterationLimit())
         (iteration == 1 || any(needs_cover)) || break
         time() < loop_deadline || break
         _set_master_objective(master, MOI.MAX_SENSE,
@@ -150,7 +217,7 @@ function MOI.optimize!(model::Optimizer)
 
     # main loop: alpha_oa gives the bound, the NLP the incumbent
     if master_status === nothing
-        for _ in 1:_option(model, "max_iter")
+        for _ in 1:MOI.get(algorithm, NumIterationLimit())
             time() < loop_deadline || break
             _cap_remaining_time(master.model, loop_deadline)
             MOI.optimize!(master.model)
@@ -164,11 +231,11 @@ function MOI.optimize!(model::Optimizer)
                 gap = _gap(sense, best_objective, master_bound)
                 total_slack = abs(MOI.get(master.model,
                     MOI.ObjectiveValue()) - master_bound) /
-                    Float64(_option(model, "oa_penalty"))
-                tol = Float64(_option(model, "convergence_tol")) *
+                    Float64(MOI.get(algorithm, OASlack()))
+                tol = Float64(MOI.get(algorithm, ConvergenceTolerance())) *
                     max(abs(best_objective), 1.0)
-                if gap <= tol &&
-                        total_slack <= Float64(_option(model, "slack_tol"))
+                if gap <= tol && total_slack <=
+                        Float64(MOI.get(algorithm, SlackTolerance()))
                     converged = true
                     break
                 end

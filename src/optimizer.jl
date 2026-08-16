@@ -1,53 +1,154 @@
 ################################################################################
+#                          ALGORITHMS AND ATTRIBUTES
+################################################################################
+"""
+    AbstractAlgorithm
+
+A super-type for the solution algorithms. Select one with the
+[`Algorithm`](@ref) attribute.
+"""
+abstract type AbstractAlgorithm end
+
+"""
+    Algorithm() <: MOI.AbstractOptimizerAttribute
+
+The algorithm the optimizer runs. Defaults to [`LOA`](@ref).
+
+**Example**
+```julia
+julia> set_attribute(model, DisjunctiveAlgorithms.Algorithm(),
+           DisjunctiveAlgorithms.LOA())
+```
+"""
+struct Algorithm <: MOI.AbstractOptimizerAttribute end
+
+"""
+    AbstractAlgorithmAttribute <: MOI.AbstractOptimizerAttribute
+
+A super-type for algorithm-specific optimizer attributes. Each
+algorithm declares `MOI.supports` for the attributes it consumes and
+documents them in its docstring.
+"""
+abstract type AbstractAlgorithmAttribute <: MOI.AbstractOptimizerAttribute end
+
+_default(::AbstractAlgorithm, attr::AbstractAlgorithmAttribute) =
+    _default(attr)
+
+"""
+    NumIterationLimit() <: AbstractAlgorithmAttribute -> Int
+
+Master/NLP iterations after the set-covering seed. Defaults to `10`.
+"""
+struct NumIterationLimit <: AbstractAlgorithmAttribute end
+_default(::NumIterationLimit) = 10
+
+"""
+    SetCoverIterationLimit() <: AbstractAlgorithmAttribute -> Int
+
+Set-covering initialization iterations. Defaults to `8`.
+"""
+struct SetCoverIterationLimit <: AbstractAlgorithmAttribute end
+_default(::SetCoverIterationLimit) = 8
+
+"""
+    M_Value() <: AbstractAlgorithmAttribute -> Float64
+
+Big-M gating the disjunct OA cuts in the master. Defaults to `1e9`.
+"""
+struct M_Value <: AbstractAlgorithmAttribute end
+_default(::M_Value) = 1e9
+
+"""
+    MasterReformulation() <: AbstractAlgorithmAttribute -> String
+
+How linear disjunct rows enter the master: `"indicator"` (constraint
+gated by the binary) or `"bigm"` (rows relaxed by `M_Value * (1 - z)`,
+tighter for solvers that cannot strengthen indicators, e.g. with
+presolve disabled). Defaults to `"indicator"`.
+"""
+struct MasterReformulation <: AbstractAlgorithmAttribute end
+_default(::MasterReformulation) = "indicator"
+
+"""
+    MaxSlack() <: AbstractAlgorithmAttribute -> Float64
+
+Upper bound of each OA cut slack. Defaults to `1e3`.
+"""
+struct MaxSlack <: AbstractAlgorithmAttribute end
+_default(::MaxSlack) = 1e3
+
+"""
+    OASlack() <: AbstractAlgorithmAttribute -> Float64
+
+Objective penalty per unit of cut slack. Defaults to `1e3`.
+"""
+struct OASlack <: AbstractAlgorithmAttribute end
+_default(::OASlack) = 1e3
+
+"""
+    UseNLPF() <: AbstractAlgorithmAttribute -> Bool
+
+Solve a slacked feasibility NLP when the primary NLP is infeasible,
+so its point still seeds OA cuts. Defaults to `true`.
+"""
+struct UseNLPF <: AbstractAlgorithmAttribute end
+_default(::UseNLPF) = true
+
+"""
+    ConvergenceTolerance() <: AbstractAlgorithmAttribute -> Float64
+
+Relative incumbent/bound gap tolerance. Defaults to `1e-6`.
+"""
+struct ConvergenceTolerance <: AbstractAlgorithmAttribute end
+_default(::ConvergenceTolerance) = 1e-6
+
+"""
+    SlackTolerance() <: AbstractAlgorithmAttribute -> Float64
+
+Total cut slack tolerance for convergence. Defaults to `1e-4`.
+"""
+struct SlackTolerance <: AbstractAlgorithmAttribute end
+_default(::SlackTolerance) = 1e-4
+
+"""
+    IterationTimeLimit() <: AbstractAlgorithmAttribute -> Float64
+
+Seconds allotted to the solve loop. Defaults to `Inf`. The overall
+budget is the standard `MOI.TimeLimitSec` attribute.
+"""
+struct IterationTimeLimit <: AbstractAlgorithmAttribute end
+_default(::IterationTimeLimit) = Inf
+
+################################################################################
 #                                OPTIMIZER
 ################################################################################
 const _Cache = MOI.Utilities.UniversalFallback{MOI.Utilities.Model{Float64}}
 
-# Raw options, mirroring DisjunctiveProgramming.jl's LOA defaults.
-const _DEFAULT_OPTIONS = Dict{String, Any}(
-    "max_iter" => 10,
-    "set_cover_max_iter" => 8,
-    "M_value" => 1e9,
-    "master_gating" => "indicator",
-    "max_slack" => 1e3,
-    "oa_penalty" => 1e3,
-    "use_nlpf" => true,
-    "convergence_tol" => 1e-6,
-    "slack_tol" => 1e-4,
-    "iteration_time_limit" => Inf,
-    "time_limit" => 3600.0,
-)
-
 """
-    Optimizer(; nlp_solver, mip_solver = nlp_solver, kwargs...)
+    Optimizer(nlp_solver, mip_solver = nlp_solver)
 
-Logic-based outer approximation solver for models containing
+Solver for models containing
 `DisjunctiveProgramming.DisjunctionSet` constraints. `nlp_solver`
 and `mip_solver` are optimizer factories as accepted by
-`MOI.instantiate`. The remaining keyword arguments set raw options
-(also reachable through `MOI.RawOptimizerAttribute`):
+`MOI.instantiate`. The algorithm (default [`LOA`](@ref)) is selected
+with the [`Algorithm`](@ref) attribute and configured through the
+attributes it documents. A new optimizer starts with a 3600 second
+`MOI.TimeLimitSec` safety limit; set it to `nothing` for no limit.
 
-- `max_iter = 10`: master/NLP iterations after the set-covering seed.
-- `set_cover_max_iter = 8`: set-covering initialization iterations.
-- `M_value = 1e9`: big-M gating the disjunct OA cuts in the master.
-- `master_gating = "indicator"`: how linear disjunct rows enter the
-  master, `"indicator"` (constraint gated by the binary) or `"bigm"`
-  (rows relaxed by `M_value * (1 - z)`, tighter for solvers that
-  cannot strengthen indicators, e.g. with presolve disabled).
-- `max_slack = 1e3`: upper bound of each OA cut slack.
-- `oa_penalty = 1e3`: objective penalty per unit of cut slack.
-- `use_nlpf = true`: solve a slacked feasibility NLP when the primary
-  NLP is infeasible, so its point still seeds OA cuts.
-- `convergence_tol = 1e-6`: relative incumbent/bound gap tolerance.
-- `slack_tol = 1e-4`: total cut slack tolerance for convergence.
-- `iteration_time_limit = Inf`: seconds allotted to the LOA loop.
-- `time_limit = 3600.0`: overall seconds budget.
+**Example**
+```julia
+julia> model = GDPModel(() -> DisjunctiveAlgorithms.Optimizer(
+           Ipopt.Optimizer, HiGHS.Optimizer));
+
+julia> optimize!(model, gdp_method = MOIDisjunction())
+```
 """
 mutable struct Optimizer <: MOI.AbstractOptimizer
     nlp_solver::Any
     mip_solver::Any
     cache::_Cache
-    options::Dict{String, Any}
+    algorithm::Union{Nothing, AbstractAlgorithm}
+    time_limit_sec::Union{Nothing, Float64}
     silent::Bool
     # results (filled by MOI.optimize!)
     termination_status::MOI.TerminationStatusCode
@@ -60,24 +161,15 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     solve_time::Float64
 end
 
-function Optimizer(;
-    nlp_solver = nothing,
-    mip_solver = nlp_solver,
-    kwargs...
-    )
-    options = copy(_DEFAULT_OPTIONS)
-    for (key, value) in kwargs
-        haskey(options, string(key)) || throw(ArgumentError(
-            "Unknown option `$key`."))
-        options[string(key)] = value
-    end
+function Optimizer(nlp_solver, mip_solver = nlp_solver)
     return Optimizer(nlp_solver, mip_solver,
         MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}()),
-        options, false, MOI.OPTIMIZE_NOT_CALLED, MOI.NO_SOLUTION,
+        nothing, 3600.0, false, MOI.OPTIMIZE_NOT_CALLED, MOI.NO_SOLUTION,
         Dict{MOI.VariableIndex, Float64}(), NaN, nothing, NaN, "", NaN)
 end
 
-_option(model::Optimizer, name::String) = model.options[name]
+_algorithm(model::Optimizer) =
+    something(model.algorithm, _default(Algorithm()))
 
 MOI.get(::Optimizer, ::MOI.SolverName) = "DisjunctiveAlgorithms"
 MOI.get(::Optimizer, ::MOI.SolverVersion) = "0.1.0"
@@ -110,6 +202,8 @@ MOI.supports_incremental_interface(::Optimizer) = true
 function MOI.copy_to(model::Optimizer, src::MOI.ModelLike)
     return MOI.Utilities.default_copy_to(model, src)
 end
+
+MOI.optimize!(model::Optimizer) = _optimize!(_algorithm(model), model)
 
 ################################################################################
 #                        MODEL-BUILDING FORWARDING
@@ -311,28 +405,33 @@ function MOI.set(
     ::MOI.TimeLimitSec,
     value::Union{Nothing, Real}
     )
-    model.options["time_limit"] = value === nothing ? Inf : Float64(value)
+    model.time_limit_sec = value === nothing ? nothing : Float64(value)
     return
 end
 
-function MOI.get(model::Optimizer, ::MOI.TimeLimitSec)
-    limit = model.options["time_limit"]
-    return isfinite(limit) ? limit : nothing
-end
+MOI.get(model::Optimizer, ::MOI.TimeLimitSec) = model.time_limit_sec
 
-function MOI.supports(model::Optimizer, attr::MOI.RawOptimizerAttribute)
-    return haskey(model.options, attr.name)
-end
+MOI.supports(::Optimizer, ::Algorithm) = true
 
-function MOI.set(model::Optimizer, attr::MOI.RawOptimizerAttribute, value)
-    MOI.supports(model, attr) || throw(MOI.UnsupportedAttribute(attr))
-    model.options[attr.name] = value
+MOI.get(model::Optimizer, ::Algorithm) = model.algorithm
+
+function MOI.set(model::Optimizer, ::Algorithm, algorithm::AbstractAlgorithm)
+    model.algorithm = algorithm
     return
 end
 
-function MOI.get(model::Optimizer, attr::MOI.RawOptimizerAttribute)
-    MOI.supports(model, attr) || throw(MOI.UnsupportedAttribute(attr))
-    return model.options[attr.name]
+function MOI.supports(model::Optimizer, attr::AbstractAlgorithmAttribute)
+    return MOI.supports(_algorithm(model), attr)
+end
+
+function MOI.set(model::Optimizer, attr::AbstractAlgorithmAttribute, value)
+    model.algorithm === nothing && (model.algorithm = _default(Algorithm()))
+    MOI.set(model.algorithm, attr, value)
+    return
+end
+
+function MOI.get(model::Optimizer, attr::AbstractAlgorithmAttribute)
+    return MOI.get(_algorithm(model), attr)
 end
 
 ################################################################################

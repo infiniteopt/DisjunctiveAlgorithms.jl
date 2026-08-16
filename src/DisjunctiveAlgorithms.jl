@@ -10,6 +10,6 @@ include("problem.jl")
 include("master.jl")
 include("nlp.jl")
 include("cuts.jl")
-include("loa.jl")
+include("algorithms/LOA.jl")
 
 end

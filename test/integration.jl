@@ -1,8 +1,7 @@
 using DisjunctiveProgramming, HiGHS, Ipopt, InfiniteOpt
 
 function _optimizer_factory()
-    return () -> DA.Optimizer(nlp_solver = Ipopt.Optimizer,
-        mip_solver = HiGHS.Optimizer)
+    return () -> DA.Optimizer(Ipopt.Optimizer, HiGHS.Optimizer)
 end
 
 # The same GDP solved through a BigM reformulation and through the
