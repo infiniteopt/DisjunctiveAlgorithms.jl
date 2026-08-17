@@ -160,7 +160,7 @@ function _solve_nlpf(
     _cap_remaining_time(nlp, deadline)
     MOI.optimize!(nlp)
     # Use the primal only at a genuine feasible point; a solver can
-    # report values at a nonfeasible/NaN primal that poisons the cut.
+    # report values at a nonfeasible/NaN primal that hurts the cut.
     _solved_and_feasible(nlp) || return nothing
     return (combination = combination,
         point = _extract_point(nlp, problem, variable_map),

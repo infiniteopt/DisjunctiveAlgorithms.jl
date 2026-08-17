@@ -161,3 +161,102 @@ end
 
 _is_nonlinear_disjunct(disjunct::_Disjunct) =
     any(!_is_linear(func) for func in disjunct.functions)
+
+################################################################################
+#                        INNER SOLVER SUPPORT CHECK
+################################################################################
+# Constraint types the master receives: variable constraints, linear
+# rows, and the gated linear disjunct rows per `MasterReformulation`.
+# The exactly-one rows, OA cuts, no-good cuts, and slack bounds are
+# always affine rows or variable bounds.
+function _master_constraint_types(model::Optimizer, problem::_Problem)
+    affine = MOI.ScalarAffineFunction{Float64}
+    required = Set{Tuple{Type, Type}}([
+        (affine, MOI.EqualTo{Float64}),
+        (affine, MOI.LessThan{Float64}),
+        (affine, MOI.GreaterThan{Float64}),
+        (MOI.VariableIndex, MOI.GreaterThan{Float64}),
+        (MOI.VariableIndex, MOI.LessThan{Float64}),
+    ])
+    for ci in problem.variable_cis
+        push!(required, (MOI.VariableIndex,
+            typeof(MOI.get(model.cache, MOI.ConstraintSet(), ci))))
+    end
+    for ci in problem.linear_cis
+        push!(required, (affine,
+            typeof(MOI.get(model.cache, MOI.ConstraintSet(), ci))))
+    end
+    for (func, set) in problem.nonlinear_rows
+        _is_linear(func) && push!(required, (affine, typeof(set)))
+    end
+    MOI.get(model, MasterReformulation()) == "indicator" || return required
+    for disjunction in problem.disjunctions,
+        disjunct in disjunction.disjuncts
+        activate = disjunct.active_value ? MOI.ACTIVATE_ON_ONE :
+            MOI.ACTIVATE_ON_ZERO
+        for (func, set) in zip(disjunct.functions, disjunct.sets)
+            _is_linear(func) || continue
+            for inner in _indicator_sets(set)
+                push!(required, (MOI.VectorAffineFunction{Float64},
+                    MOI.Indicator{activate, typeof(inner)}))
+            end
+        end
+    end
+    return required
+end
+
+# Constraint types the NLP subproblems receive: every global and
+# disjunct row plus the binary fixes and the NLPF slack variable.
+function _nlp_constraint_types(model::Optimizer, problem::_Problem)
+    required = Set{Tuple{Type, Type}}([
+        (MOI.VariableIndex, MOI.EqualTo{Float64}),
+        (MOI.VariableIndex, MOI.GreaterThan{Float64}),
+    ])
+    indicators = Set(problem.binaries)
+    for ci in problem.variable_cis
+        vi = MOI.get(model.cache, MOI.ConstraintFunction(), ci)
+        vi in indicators && continue
+        push!(required, (MOI.VariableIndex,
+            typeof(MOI.get(model.cache, MOI.ConstraintSet(), ci))))
+    end
+    for ci in problem.linear_cis
+        push!(required, (MOI.ScalarAffineFunction{Float64},
+            typeof(MOI.get(model.cache, MOI.ConstraintSet(), ci))))
+    end
+    for (func, set) in problem.nonlinear_rows
+        push!(required, (typeof(func), typeof(set)))
+    end
+    for disjunction in problem.disjunctions,
+        disjunct in disjunction.disjuncts
+        for (func, set) in zip(disjunct.functions, disjunct.sets)
+            push!(required, (typeof(func), typeof(set)))
+        end
+    end
+    return required
+end
+
+function _check_support(solver, name::String, destination::String, required)
+    for (F, S) in required
+        MOI.supports_constraint(solver, F, S) || error(
+            "The `$name` ($(MOI.get(solver, MOI.SolverName()))) does " *
+            "not support `$F`-in-`$S` constraints, which the " *
+            "$destination requires.")
+    end
+    return
+end
+
+# Fail before any subproblem work when an inner solver cannot take the
+# constraint types routed to it, naming the solver and the type.
+function _check_inner_support(model::Optimizer, problem::_Problem)
+    mip = _instantiate(model.mip_solver, "mip_solver")
+    _check_support(mip, "mip_solver", "master problem",
+        _master_constraint_types(model, problem))
+    nlp = _instantiate(model.nlp_solver, "nlp_solver")
+    _check_support(nlp, "nlp_solver", "NLP subproblems",
+        _nlp_constraint_types(model, problem))
+    F = typeof(problem.objective)
+    MOI.supports(nlp, MOI.ObjectiveFunction{F}()) || error(
+        "The `nlp_solver` ($(MOI.get(nlp, MOI.SolverName()))) does " *
+        "not support the `$F` objective the NLP subproblems require.")
+    return
+end

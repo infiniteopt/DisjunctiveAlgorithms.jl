@@ -16,7 +16,7 @@ function test_lowering_solve_linear()
     @constraint(model, x <= 7, Disjunct(Y[2]))
     @disjunction(model, Y)
     @objective(model, Max, x)
-    optimize!(model, gdp_method = MOIDisjunction())
+    optimize!(model, gdp_method = Direct())
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 7.0 atol = 1e-4
     @test value(x) ≈ 7.0 atol = 1e-4
@@ -45,7 +45,7 @@ function test_lowering_solve_nonlinear()
     @constraint(model, x^2 == 64, Disjunct(Y[2]))
     @disjunction(model, Y)
     @objective(model, Max, x)
-    optimize!(model, gdp_method = MOIDisjunction())
+    optimize!(model, gdp_method = Direct())
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 8.0 atol = 1e-3
     @test value(Y[2])
@@ -65,7 +65,7 @@ function test_lowering_solve_nested()
     @disjunction(model, W, Disjunct(Y[2]))
     @disjunction(model, Y)
     @objective(model, Max, x)
-    optimize!(model, gdp_method = MOIDisjunction())
+    optimize!(model, gdp_method = Direct())
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 8.0 atol = 1e-3
     @test value(Y[2])
@@ -84,7 +84,7 @@ function test_lowering_infinite()
     @constraint(model, x >= 5, Disjunct(Y[2]))
     @disjunction(model, Y)
     @objective(model, Max, integral(x, t))
-    optimize!(model, gdp_method = MOIDisjunction())
+    optimize!(model, gdp_method = Direct())
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 10.0 atol = 1e-4
     @test all(value(x) .>= 5.0 .- 1e-4)
@@ -106,7 +106,7 @@ function test_lowering_infinite_nested()
     @disjunction(model, W, Disjunct(Y[2]))
     @disjunction(model, Y)
     @objective(model, Max, integral(x, t))
-    optimize!(model, gdp_method = MOIDisjunction())
+    optimize!(model, gdp_method = Direct())
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 10.0 atol = 1e-4
 end

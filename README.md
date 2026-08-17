@@ -24,17 +24,16 @@ options selected through optimizer attributes.
 using DisjunctiveProgramming, DisjunctiveAlgorithms, HiGHS, Ipopt
 import DisjunctiveAlgorithms as DA
 
-model = GDPModel(() -> DA.Optimizer(nlp_solver = Ipopt.Optimizer,
-    mip_solver = HiGHS.Optimizer))
+model = GDPModel(() -> DA.Optimizer(Ipopt.Optimizer, HiGHS.Optimizer))
 @variable(model, 0 <= x <= 10)
 @variable(model, Y[1:2], Logical)
 @constraint(model, x <= 3, Disjunct(Y[1]))
 @constraint(model, x^2 == 64, Disjunct(Y[2]))
 @disjunction(model, Y)
 @objective(model, Max, x)
-optimize!(model, gdp_method = MOIDisjunction())
+optimize!(model, gdp_method = Direct())
 ```
 
-`MOIDisjunction()` lowers each disjunction to a single
+`Direct()` lowers each disjunction to a single
 `DisjunctionSet` constraint that this package consumes directly; no
 Big-M or Hull reformulation is performed on the modeling side.

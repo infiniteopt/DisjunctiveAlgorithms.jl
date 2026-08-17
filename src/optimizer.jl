@@ -140,7 +140,7 @@ attributes it documents. A new optimizer starts with a 3600 second
 julia> model = GDPModel(() -> DisjunctiveAlgorithms.Optimizer(
            Ipopt.Optimizer, HiGHS.Optimizer));
 
-julia> optimize!(model, gdp_method = MOIDisjunction())
+julia> optimize!(model, gdp_method = Direct())
 ```
 """
 mutable struct Optimizer <: MOI.AbstractOptimizer
@@ -329,7 +329,7 @@ function MOI.supports(
 end
 
 # The LOA loop consumes warm starts, so accept them even though the
-# honest inner model does not store them (the fallback does).
+# inner model does not store them (the fallback does).
 function MOI.supports(
     ::Optimizer,
     ::MOI.VariablePrimalStart,

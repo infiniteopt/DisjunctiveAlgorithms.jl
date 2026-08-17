@@ -683,6 +683,44 @@ function test_nested_disjunction_vacuous()
     @test value(zin[1]) + value(zin[2]) ≈ 0.0 atol = 1e-5
 end
 
+# The upfront capability check fails before any subproblem work and
+# names the offending inner solver and constraint type.
+function test_inner_solver_support_check()
+    # HiGHS as the nlp_solver cannot take the quadratic disjunct row
+    model = Model(() -> DA.Optimizer(HiGHS.Optimizer))
+    set_silent(model)
+    @variable(model, 0 <= x <= 4)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x^2, x] in DA.DisjunctionSet([
+        [MOI.LessThan(4.0)], [MOI.LessThan(1.0)]]))
+    @objective(model, Min, x)
+    err = try
+        optimize!(model)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("nlp_solver", err.msg)
+    @test occursin("ScalarQuadraticFunction", err.msg)
+    # Ipopt as the mip_solver cannot take the master's discrete parts
+    model = Model(() -> DA.Optimizer(Ipopt.Optimizer))
+    set_silent(model)
+    @variable(model, 0 <= y <= 10)
+    @variable(model, w[1:2], Bin)
+    @constraint(model, [1, w[1], w[2], y, y] in DA.DisjunctionSet([
+        [MOI.GreaterThan(2.0)], [MOI.GreaterThan(5.0)]]))
+    @objective(model, Min, y)
+    err = try
+        optimize!(model)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("mip_solver", err.msg)
+end
+
 @testset "LOA loop" begin
     test_linear_disjunction()
     test_row_function_constants()
@@ -718,6 +756,7 @@ end
     test_linear_interval_disjunct()
     test_reoptimize_resets_results()
     test_bridged_vector_constraint()
+    test_inner_solver_support_check()
 end
 
 @testset "LOA units" begin
