@@ -1,7 +1,7 @@
 name = "DisjunctiveAlgorithms"
 uuid = "af3b8e3a-4098-461f-b6c0-2c9706adb26e"
-authors = ["Daniel Nguyen", "Joshua Pulsipher"]
 version = "0.1.0"
+authors = ["Daniel Nguyen", "Joshua Pulsipher"]
 
 [deps]
 DisjunctiveProgramming = "0d27d021-0159-4c7d-b4a7-9ccb5d9366cf"
@@ -9,7 +9,7 @@ MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
-DisjunctiveProgramming = "0.7"
+DisjunctiveProgramming = "0.7, 0.8"
 MathOptInterface = "1"
 julia = "1.10"
 
