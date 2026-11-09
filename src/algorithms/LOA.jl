@@ -450,11 +450,15 @@ function _store_results(
             model.termination_status = MOI.TIME_LIMIT
         elseif master_status === nothing
             model.termination_status = MOI.ITERATION_LIMIT
-        elseif master_status == MOI.DUAL_INFEASIBLE
+        elseif master_status == MOI.DUAL_INFEASIBLE ||
+                master_status == MOI.INFEASIBLE_OR_UNBOUNDED
+            # solvers often report an unbounded master as
+            # INFEASIBLE_OR_UNBOUNDED
             model.termination_status = MOI.OTHER_LIMIT
             model.raw_status = "No feasible incumbent: the master is " *
-                "unbounded (no OA cut bounds the objective yet); the " *
-                "model itself may be unbounded."
+                "unbounded or infeasible ($master_status); with no OA " *
+                "cut bounding the objective yet, the model itself may " *
+                "be unbounded."
         else
             model.termination_status = MOI.OTHER_LIMIT
             model.raw_status = "No feasible incumbent: the master " *
@@ -465,6 +469,13 @@ function _store_results(
     model.primal_status = MOI.FEASIBLE_POINT
     model.incumbent = incumbent_result.point
     model.objective_value = best_objective
+    # the master bounds only unvisited combinations, so the incumbent
+    # bounds the visited ones
+    if master_bound !== nothing
+        master_bound = sense == MOI.MAX_SENSE ?
+            max(master_bound, best_objective) :
+            min(master_bound, best_objective)
+    end
     model.objective_bound = master_bound === nothing ? nothing :
         Float64(master_bound)
     combinations_exhausted = master_status == MOI.INFEASIBLE &&

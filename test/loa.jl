@@ -281,6 +281,26 @@ function test_max_sense_linear()
     @test value(z[2]) ≈ 1.0 atol = 1e-5
 end
 
+# The master bounds only unvisited combinations, so once the optimum is
+# visited its value can fall below the incumbent; the reported bound
+# is the better of the two and the gap is never negative.
+function test_bound_not_worse_than_incumbent()
+    model = Model(_loa_optimizer())
+    set_silent(model)
+    @variable(model, 0 <= x[1:2] <= 9)
+    @variable(model, b[1:2], Bin)
+    for i in 1:2
+        @constraint(model, [1, b[i], 1 - b[i], x[i], x[i]] in
+            DA.DisjunctionSet([[MOI.LessThan(2.0)], [MOI.GreaterThan(8.0)]]))
+    end
+    @objective(model, Max, sum(x))
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test objective_value(model) ≈ 18.0 atol = 1e-4
+    @test objective_bound(model) >= objective_value(model) - 1e-6
+    @test relative_gap(model) >= 0.0
+end
+
 # Two disjunctions: port of DP.jl test_loa_solve_two_disjunctions.
 function test_two_disjunctions()
     model = Model(_loa_optimizer())
@@ -728,9 +748,27 @@ function test_iteration_limit_with_incumbent()
     @test objective_bound(model) == -Inf
 end
 
-# An unbounded master (no OA cuts yet bound alpha_oa) surfaces its
-# status instead of looping.
+# An unbounded master (no OA cuts yet bound alpha_oa under a nonlinear
+# objective) surfaces its status instead of looping. Solvers report it
+# as INFEASIBLE_OR_UNBOUNDED as often as DUAL_INFEASIBLE.
 function test_master_abnormal_status()
+    model = Model(_loa_optimizer(DA.SetCoverIterationLimit() => 0))
+    set_silent(model)
+    @variable(model, 0 <= x <= 10)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x, x] in DA.DisjunctionSet([
+        [MOI.LessThan(3.0)], [MOI.LessThan(7.0)]]))
+    @objective(model, Min, x^2)
+    optimize!(model)
+    @test termination_status(model) == MOI.OTHER_LIMIT
+    @test result_count(model) == 0
+    @test occursin("unbounded or infeasible", raw_status(model))
+end
+
+# A linear objective bounds alpha_oa exactly, so the master is bounded
+# before any NLP point: the same instance with `Min x` solves even with
+# set covering off.
+function test_linear_objective_bounds_master()
     model = Model(_loa_optimizer(DA.SetCoverIterationLimit() => 0))
     set_silent(model)
     @variable(model, 0 <= x <= 10)
@@ -739,9 +777,32 @@ function test_master_abnormal_status()
         [MOI.LessThan(3.0)], [MOI.LessThan(7.0)]]))
     @objective(model, Min, x)
     optimize!(model)
-    @test termination_status(model) == MOI.OTHER_LIMIT
-    @test result_count(model) == 0
-    @test occursin("master solve finished", raw_status(model))
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test objective_value(model) ≈ 0.0 atol = 1e-5
+    @test objective_bound(model) ≈ 0.0 atol = 1e-5
+end
+
+# Complementarity pairs [v == 0] or [y == c]: the all-second-disjunct
+# combination asks y == 0 and y == 6 at once. The NLPF relaxes the
+# equalities on both sides, so that combination still yields a point
+# and an objective cut; with exact equalities the master stays
+# unbounded under the quadratic objective.
+function test_equality_disjunct_infeasible_combination()
+    model = Model(_loa_optimizer())
+    set_silent(model)
+    @variable(model, 0 <= y <= 6)
+    @variable(model, -1 <= v[1:2] <= 0)
+    @variable(model, b[1:2], Bin)
+    equalities = [[MOI.EqualTo(0.0)], [MOI.EqualTo(0.0)]]
+    @constraint(model, [1, b[1], 1 - b[1], v[1], y] in
+        DA.DisjunctionSet(equalities))
+    @constraint(model, [1, b[2], 1 - b[2], v[2], y - 6] in
+        DA.DisjunctionSet(equalities))
+    @objective(model, Min, (y - 2)^2 + v[1] + v[2])
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test objective_value(model) ≈ 0.0 atol = 1e-4
+    @test value(y) ≈ 2.0 atol = 1e-3
 end
 
 # An unbounded NLP restriction proves the model unbounded: the solve
@@ -923,6 +984,28 @@ function test_master_abnormal_status_with_incumbent()
     @test termination_status(model) == MOI.OTHER_LIMIT
     @test primal_status(model) == MOI.FEASIBLE_POINT
     @test occursin("limit hit", raw_status(model))
+end
+
+# The master finishes abnormally before any incumbent: with set
+# covering off, the first MIP solve is the master and reports a node
+# limit, which surfaces as the master's own status.
+function test_master_abnormal_status_no_incumbent()
+    mip = () -> MockSolver(HiGHS.Optimizer, fail_from = 1)
+    factory = optimizer_with_attributes(
+        () -> DA.Optimizer(Ipopt.Optimizer, mip),
+        DA.SetCoverIterationLimit() => 0)
+    model = Model(factory)
+    set_silent(model)
+    @variable(model, 0 <= x <= 10)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x, x] in DA.DisjunctionSet([
+        [MOI.GreaterThan(2.0)], [MOI.GreaterThan(5.0)]]))
+    @objective(model, Min, x)
+    optimize!(model)
+    @test termination_status(model) == MOI.OTHER_LIMIT
+    @test result_count(model) == 0
+    @test occursin("master solve finished with status NODE_LIMIT",
+        raw_status(model))
 end
 
 ################################################################################
@@ -1216,6 +1299,7 @@ end
     test_combination_sources()
     test_quadratic_objective()
     test_max_sense_linear()
+    test_bound_not_worse_than_incumbent()
     test_two_disjunctions()
     test_nonlinear_global()
     test_nonlinear_exp_global()
@@ -1236,6 +1320,8 @@ end
     test_iteration_limit_no_incumbent()
     test_iteration_limit_with_incumbent()
     test_master_abnormal_status()
+    test_linear_objective_bounds_master()
+    test_equality_disjunct_infeasible_combination()
     test_unbounded_model()
     test_nlp_failure_unresolved()
     test_nlp_failure_no_incumbent()
@@ -1245,6 +1331,7 @@ end
     test_strict_constant_solvers()
     test_time_limit_with_incumbent()
     test_master_abnormal_status_with_incumbent()
+    test_master_abnormal_status_no_incumbent()
     test_nonconvex_never_optimal()
     test_feasibility_sense()
     test_linear_interval_disjunct()

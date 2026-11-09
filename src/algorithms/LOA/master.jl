@@ -68,6 +68,10 @@ function _build_master(model::Optimizer, problem::_Problem)
     end
     alpha_oa = MOI.add_variable(mip)
     sense = problem.sense
+    if _is_linear(problem.objective)
+        _add_linear_objective_row(mip, variable_map, problem.objective,
+            alpha_oa, sense)
+    end
     oa_objective = MOI.ScalarAffineFunction(
         [MOI.ScalarAffineTerm(1.0, alpha_oa)], 0.0)
     MOI.set(mip, MOI.ObjectiveSense(), sense)
@@ -76,6 +80,28 @@ function _build_master(model::Optimizer, problem::_Problem)
         oa_objective)
     return _Master(mip, variable_map, sense, problem.objective, alpha_oa,
         oa_objective)
+end
+
+# A linear objective bounds `alpha_oa` exactly from the start: MIN
+# `objective <= alpha_oa`, MAX symmetric. Without it `alpha_oa` stays
+# free until an NLP returns a point, so a first infeasible combination
+# leaves the master unbounded.
+function _add_linear_objective_row(
+    mip::MOI.ModelLike,
+    variable_map::AbstractDict,
+    objective::MOI.AbstractScalarFunction,
+    alpha_oa::MOI.VariableIndex,
+    sense::MOI.OptimizationSense
+    )
+    objective_func = _map_to(variable_map, _to_affine(objective))
+    alpha = _to_affine(alpha_oa)
+    if sense == MOI.MAX_SENSE
+        body = MOI.Utilities.operate(-, Float64, alpha, objective_func)
+    else
+        body = MOI.Utilities.operate(-, Float64, objective_func, alpha)
+    end
+    MOI.Utilities.normalize_and_add_constraint(mip, body, MOI.LessThan(0.0))
+    return
 end
 
 function _build_set_cover(model::Optimizer, problem::_Problem)
