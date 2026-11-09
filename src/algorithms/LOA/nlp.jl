@@ -297,17 +297,28 @@ end
 ################################################################################
 #                       NLPF (FEASIBILITY SUBPROBLEM)
 ################################################################################
-_nlpf_slacked(func, u, ::MOI.LessThan{Float64}) =
-    MOI.Utilities.operate(-, Float64, func, u)
-_nlpf_slacked(func, u, ::MOI.GreaterThan{Float64}) =
-    MOI.Utilities.operate(+, Float64, func, u)
-_nlpf_slacked(func, u, ::MOI.AbstractScalarSet) = nothing
+# Rows of `func in set` relaxed by the nonnegative slack `u`; an
+# equality or interval relaxes on both sides
+_nlpf_slacked_rows(func, u, set::MOI.LessThan{Float64}) =
+    [(MOI.Utilities.operate(-, Float64, func, u), set)]
+_nlpf_slacked_rows(func, u, set::MOI.GreaterThan{Float64}) =
+    [(MOI.Utilities.operate(+, Float64, func, u), set)]
+function _nlpf_slacked_rows(func, u, set::MOI.EqualTo{Float64})
+    return _nlpf_slacked_rows(func, u, MOI.Interval(set.value, set.value))
+end
+function _nlpf_slacked_rows(func, u, set::MOI.Interval{Float64})
+    return [(MOI.Utilities.operate(-, Float64, func, u),
+            MOI.LessThan(set.upper)),
+        (MOI.Utilities.operate(+, Float64, func, u),
+            MOI.GreaterThan(set.lower))]
+end
+_nlpf_slacked_rows(func, u, set::MOI.AbstractScalarSet) = [(func, set)]
 
 # The slacked feasibility NLP: one nonnegative `u` relaxes every scalar
-# inequality row (bounds and equalities stay exact) and is minimized.
-# Its solution is a linearization site for an infeasible combination.
+# row (bounds stay exact) and is minimized. Its solution is a
+# linearization site for an infeasible combination.
 # One slacked copy at a combination: bounds and binary fixes exact,
-# every inequality row relaxed by the copy's nonnegative `u`.
+# every row relaxed by the copy's nonnegative `u`.
 function _add_slacked_copy(
     nlp::MOI.ModelLike,
     model::Optimizer,
@@ -340,8 +351,9 @@ function _add_slacked_copy(
     end
     for (func, set) in rows
         mapped = _map_to(variable_map, func)
-        slacked = _nlpf_slacked(mapped, u, set)
-        MOI.add_constraint(nlp, something(slacked, mapped), set)
+        for (slacked, slacked_set) in _nlpf_slacked_rows(mapped, u, set)
+            MOI.add_constraint(nlp, slacked, slacked_set)
+        end
     end
     return variable_map, u
 end
