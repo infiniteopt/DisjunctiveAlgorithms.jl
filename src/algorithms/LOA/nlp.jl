@@ -312,7 +312,6 @@ function _nlpf_slacked_rows(func, u, set::MOI.Interval{Float64})
         (MOI.Utilities.operate(+, Float64, func, u),
             MOI.GreaterThan(set.lower))]
 end
-_nlpf_slacked_rows(func, u, set::MOI.AbstractScalarSet) = [(func, set)]
 
 # The slacked feasibility NLP: one nonnegative `u` relaxes every scalar
 # row (bounds stay exact) and is minimized. Its solution is a

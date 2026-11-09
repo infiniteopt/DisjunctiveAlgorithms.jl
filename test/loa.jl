@@ -986,6 +986,28 @@ function test_master_abnormal_status_with_incumbent()
     @test occursin("limit hit", raw_status(model))
 end
 
+# The master finishes abnormally before any incumbent: with set
+# covering off, the first MIP solve is the master and reports a node
+# limit, which surfaces as the master's own status.
+function test_master_abnormal_status_no_incumbent()
+    mip = () -> MockSolver(HiGHS.Optimizer, fail_from = 1)
+    factory = optimizer_with_attributes(
+        () -> DA.Optimizer(Ipopt.Optimizer, mip),
+        DA.SetCoverIterationLimit() => 0)
+    model = Model(factory)
+    set_silent(model)
+    @variable(model, 0 <= x <= 10)
+    @variable(model, z[1:2], Bin)
+    @constraint(model, [1, z[1], z[2], x, x] in DA.DisjunctionSet([
+        [MOI.GreaterThan(2.0)], [MOI.GreaterThan(5.0)]]))
+    @objective(model, Min, x)
+    optimize!(model)
+    @test termination_status(model) == MOI.OTHER_LIMIT
+    @test result_count(model) == 0
+    @test occursin("master solve finished with status NODE_LIMIT",
+        raw_status(model))
+end
+
 ################################################################################
 #                            UNIT TESTS
 ################################################################################
@@ -1309,6 +1331,7 @@ end
     test_strict_constant_solvers()
     test_time_limit_with_incumbent()
     test_master_abnormal_status_with_incumbent()
+    test_master_abnormal_status_no_incumbent()
     test_nonconvex_never_optimal()
     test_feasibility_sense()
     test_linear_interval_disjunct()
